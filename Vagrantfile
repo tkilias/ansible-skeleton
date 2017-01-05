@@ -25,8 +25,12 @@ hosts = YAML.load_file('vagrant-hosts.yml')
 def provision_ansible(config)
   if run_locally?
     # Provisioning configuration for shell script.
-    config.vm.provision 'shell' do |sh|
-      sh.path = 'scripts/run-playbook-locally.sh'
+    config.vm.provision "ansible_local" do |ansible|
+      ansible.playbook = 'ansible/site.yml'
+      ansible.sudo = true
+      ansible.install = true
+      ansible.install_mode = ':pip'
+      ansible.version = 'latest'
     end
   else
     # Provisioning configuration for Ansible (for Mac/Linux hosts).
@@ -72,12 +76,24 @@ end
 def custom_synced_folders(vm, host)
   return unless host.key?('synced_folders')
   folders = host['synced_folders']
-
   folders.each do |folder|
     vm.synced_folder folder['src'], folder['dest'], folder['options']
   end
 end
 
+def custom_disks(vb,host)
+  return unless host.key?('disks')
+  disks = host['disks']
+  disksDir = File.join(Dir.pwd, "disks")
+  disks.each_with_index do  |disk,index|
+    diskPort = index + 2
+    diskFile = File.join(disksDir,host['name'],diskPort.to_s+".vdi")
+    unless File.exist?('')
+      vb.customize ['createhd', '--filename', diskFile, '--variant', 'Fixed', '--size', disk.size]
+    end
+    vb.customize ['storageattach', :id,  '--storagectl', 'SATA Controller', '--port', diskPort, '--device', 0, '--type', 'hdd', '--medium', diskFile]
+  end
+end
 # }}}
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
@@ -91,10 +107,15 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       node.vm.network :private_network, network_options(host)
       custom_synced_folders(node.vm, host)
 
+      config.persistent_storage.enabled = true
+      config.persistent_storage.location = "./test.vdi"
+      config.persistent_storage.size = 5000
+
       node.vm.provider :virtualbox do |vb|
         # WARNING: if the name of the current directory is the same as the
         # host name, this will fail.
         vb.customize ['modifyvm', :id, '--groups', PROJECT_NAME]
+       custom_disks(vb,host)
       end
     end
   end
